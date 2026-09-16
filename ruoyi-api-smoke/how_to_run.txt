@@ -1,0 +1,13 @@
+-运行某个具体case，不输出任何print信息
+    python -m pytest cases/test_login.py
+
+-运行某个具体case，输出print信息
+    python -m pytest -s cases/test_login.py
+
+- 运行一组case
+python -m pytest -s cases/test_user.py cases/test_role.pyill
+
+- 生成allure报告
+python -m pytest cases -s -v --alluredir=./report/allure-results --clean-alluredir
+打开报告
+allure serve ./report/allure-results
