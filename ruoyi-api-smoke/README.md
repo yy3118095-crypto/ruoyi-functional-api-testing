@@ -1,69 +1,230 @@
+# RuoYi API Smoke
+
+基于 `pytest + requests + Excel + Redis + Allure` 的若依接口冒烟测试项目。
+
+当前覆盖登录、用户管理、角色管理，以及用户与角色状态关联等业务流程。测试数据由 Excel 驱动，运行期间产生的用户、角色和 Token 等动态数据统一保存在 `libs/global_data.py` 中。
+
+# 项目结构
+
+```text
+ruoyi-api-smoke/
+├─ cases/                     # 测试用例
+│  ├─ test_auth.py            # 验证码及登录链路
+│  ├─ test_user.py            # 用户管理
+│  ├─ test_role.py            # 角色管理
+│  └─ test_permission_flow.py # 用户、角色及 Token 状态流转
+├─ config/
+│  └─ config.py               # 环境、接口路径及测试数据配置
+├─ data/
+│  └─ datas.xlsx              # Excel 数据驱动文件
+├─ libs/                      # 请求、断言、提取、登录等公共方法
+├─ conftest.py                # 公共夹具及 Allure 配置
+├─ pytest.ini                 # pytest 配置
+└─ requirements.txt           # Python 依赖
+```
+
+# 环境准备
+
+## 1. 基础环境
+
+- Python 3.10 及以上版本
+- 可正常访问的若依后端服务
+- Redis 服务，且测试机可以读取验证码数据
+- Allure Commandline（仅生成并查看 Allure 报告时需要）
+
+## 2. 安装依赖
+
+建议在项目根目录创建虚拟环境后安装依赖：
+
+```bash
+python -m venv .venv
+```
+
+Windows PowerShell 激活虚拟环境：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+## 3. 修改配置
+
+开始测试前，根据本地环境修改 `config/config.py`：
+
+- `BASE_URL`：若依后端地址，目前默认为 `http://localhost/dev-api`
+- `ADMIN_USERNAME`、`ADMIN_PASSWORD`：管理员账号和密码
+- `PATH`：Excel 测试数据路径，目前默认为 `data/datas.xlsx`
+- `SHEET_NAME`：默认读取的 sheet，目前为 `auth`
+- `USER_*`：测试用户相关数据
+- `ROLE_*`：测试角色相关数据
+
+验证码通过 `libs/redis_utils.py` 查询 Redis，目前默认配置为：
+
+```text
+host=localhost
+port=6379
+db=0
+key=captcha_codes:{uuid}
+```
+
+Redis 配置或验证码 key 规则不一致时，需要同步修改该文件。
+
+# Excel 数据驱动
+
+测试数据文件：`data/datas.xlsx`
+
+当前用例对应的 sheet：
+
+- `auth` --> 登录接口
+- `user` --> 用户管理接口
+- `role` --> 角色管理接口
+- `permission` --> 权限及状态流转
+
+Excel 第 3 行为字段名，从第 4 行开始读取测试数据；只有 `is_true` 为真值的用例才会参与执行。
+
+常用字段说明：
+
+- `id` --> 用例编号，也是 pytest 参数化用例名称
+- `title` --> 用例标题
+- `feature`、`story` --> Allure 报告分类
+- `method`、`url` --> 请求方式和接口地址
+- `headers`、`params`、`data`、`json` --> 请求数据
+- `statusCode` --> 预期 HTTP 状态码
+- `check_res_body` --> 响应体断言
+- `jsonExData` --> 动态数据提取规则
+- `action` --> 二次业务校验或状态流转动作
+- `is_true` --> 是否执行该条用例
+
+Excel 中可以使用 `{{TOKEN}}`、`{{USER_ID}}`、`{{ROLE_ID}}`、`{{USER_TOKEN}}` 等变量。执行时会从 `libs/global_data.py` 的 `datas` 中替换为当前动态值。
+
 # cases
 
-## test_auth.py-->登录链路
+## test_auth.py --> 登录链路
+
 覆盖验证码以及登录接口：
-- GET /captchaImage-->包含获取验证码，提取uuid，Python 根据 uuid 查询 Redis,拿到验证码答案'code'
-- POST /login-->拿着验证码接口抓到的uuid和code登录-->提取 token
 
-### 数据驱动sheet-->autu
-- **SMK-LOGIN-001必须为登陆成功用例**，夹具需做前置处理，从该用例提取token
-- conftest中根据自己的excel数据sheet名称更改读取的sheet_name，目前默认sheet_name="auth"
+- `GET /captchaImage` --> 获取验证码并提取 `uuid`，再根据 `uuid` 从 Redis 查询验证码答案 `code`
+- `POST /login` --> 携带 `uuid` 和 `code` 登录，登录成功后提取 Token
 
-## test_user.py-->用户管理
-- 必须先执行登录，再执行用户查询-->获取动态data（ruoyi-api-smoke\libs\global_data.py），否则无法直接获取Authorization: Bearer 
+### 数据驱动 sheet --> auth
 
-## test_role.py-->简单角色管理
-- 主要负责CRUD + 二次断言
+- **`SMK-LOGIN-001` 必须为管理员登录成功用例**，`admin_token` 夹具会从该用例提取 Token
+- `test_auth.py` 当前暂不执行 `SMK-LOGIN-008` 至 `SMK-LOGIN-011`
+- 修改 sheet 名称时，需要同步检查 `config/config.py` 和对应测试文件中的 `read_excel(sheet_name=...)`
 
-## test_permission_flow.py--> 复杂角色管理中：用户--角色状态关联问题
-- 专门负责较复杂业务流程 / 状态迁移测试
+## test_user.py --> 用户管理
 
-# config
-## config
-- 开始测试前需要根据个人情况配置环境设置和测试数据路径配置
-- 其余所需配置可在此文件按需补充
+- 覆盖用户查询、新增、修改和删除等接口
+- 必须先完成管理员登录，再执行用户管理用例，否则无法得到 `Authorization: Bearer <TOKEN>`
+- 修改用户后会重新查询目标用户，对昵称等业务结果进行二次断言
+- 动态数据保存在 `libs/global_data.py`，可供后续用例继续使用
 
+## test_role.py --> 简单角色管理
 
+- 主要负责角色 CRUD、响应断言和动态数据提取
+- `action` 字段用于区分 `list`、`add`、`update`、`delete` 等操作
 
-建议按这个顺序完整阅读：
-1. 第 6～10 节：掌握项目主线
-   - 动态变量和接口关联
-   - fixture 生命周期
-   - 响应断言
-   - 登录与 Token
-   - permission 权限业务链
-2. 第 12 节：理解真实排错经历
-   - USER_ID 提取失败
-   - 上游失败引发连锁报错
-   - 已删除用户产生脏关联
-   - 新旧 Token 混用
-   - fixture 批量报错
-3. 第 16～18 节：准备面试
-   - 项目介绍
-   - 简历表述
-   - 五个真实案例
-   - 高频追问
-4. 第 1～5 节：补齐项目背景和基础
-   - 项目规模与定位
-   - 从功能测试转成接口测试
-   - 目录结构
-   - HTTP、Requests
-   - Excel 数据驱动
-5. 第 11 节：单独复习 Allure
-   - 报告生成原理
-   - feature、story、title
-   - step 和 attach
-   - 请求响应附件
-   - 数据脱敏
-6. 第 13～14 节：练习实际运行和排错
-   - 自己敲一遍运行命令
-   - 练习判断收集错误、setup error、接口失败和断言失败
-   - 熟悉从第一条失败向上游排查的方法
-7. 第 15 节：准备“项目还有什么不足”
-   - 数据权限验证不够完整
-   - 权限列表没有完全替代真实接口鉴权验证
-   - 脱敏、依赖锁定和失败清理仍可改善
-8. 最后看第 19 节
-   - 核对代码来源
-   - 了解哪些是旧结论
-   - 避免面试时把“讨论过的能力”说成“已经实现的能力”
+## test_permission_flow.py --> 复杂权限流程
+
+专门负责较复杂的业务流程和状态迁移测试，包括：
+
+- 普通用户停用后无法登录
+- 普通用户恢复后可以重新登录
+- 用户删除后无法登录
+- 管理员退出后旧 Token 失效
+- 管理员重新登录后新 Token 有效
+
+该文件中的用例存在前后状态依赖，建议按 Excel 中的既定顺序整体执行，不要随意单独运行中间步骤。
+
+# 公共夹具
+
+`conftest.py` 中的主要夹具：
+
+- `admin_token`（session）--> 整个测试会话登录一次管理员，并保存 `TOKEN`
+- `prepared_role`（session）--> 创建测试角色，结束后自动删除
+- `prepared_user`（session）--> 创建测试用户，结束后自动删除
+- `user_token`（function）--> 每条需要普通用户身份的测试重新登录，避免继续使用权限变化前的旧 Token
+
+执行前会尝试清理同名历史测试数据；执行完成后也会自动清理本次创建的用户和角色。建议为 `USER_NAME`、`ROLE_NAME` 配置专用测试名称，避免与人工维护的数据重名。
+
+# 运行测试
+
+以下命令均在项目根目录执行。
+
+## 运行全部用例
+
+```bash
+python -m pytest -s -v cases
+```
+
+## 运行某个测试文件
+
+不输出 `print` 信息：
+
+```bash
+python -m pytest cases/test_auth.py
+```
+
+输出 `print` 信息：
+
+```bash
+python -m pytest -s cases/test_auth.py
+```
+
+## 运行一组测试文件
+
+```bash
+python -m pytest -s cases/test_user.py cases/test_role.py
+```
+
+## 运行某条用例
+
+参数化用例 ID 会使用 Excel 中的 `id`，可通过 `-k` 筛选：
+
+```bash
+python -m pytest -s cases/test_auth.py -k "SMK-LOGIN-001"
+```
+
+# Allure 报告
+
+生成 Allure 测试结果：
+
+```bash
+python -m pytest cases -s -v --alluredir=./report/allure-results --clean-alluredir
+```
+
+打开报告：
+
+```bash
+allure serve ./report/allure-results
+```
+
+报告会按 Excel 中的 `feature`、`story` 分类，并自动写入当前运行环境、`BASE_URL`、Python 和 pytest 版本等信息。
+
+# 注意事项
+
+- 运行登录用例前，确认若依后端与 Redis 均已启动
+- 测试机必须能直接读取若依验证码所在的 Redis 数据库
+- `SMK-LOGIN-001` 必须保持为有效的管理员登录成功用例
+- 权限流程包含严格的状态依赖，建议单进程、按既定顺序执行
+- 不建议直接启用 `pytest-xdist` 并行执行，多个用例会共享 `libs/global_data.py` 中的动态数据
+- 用例异常中断时可能来不及执行 teardown；下次运行会清理同名历史用户和角色
+- Excel 中的字典、列表等字段需要保持合法的 Python 字面量格式，否则 `ast.literal_eval` 会解析失败
+
+# 常见问题
+
+## Redis 中未获取到验证码
+
+检查 Redis 地址、端口、数据库编号及 key 前缀，并确认后端验证码功能已开启。
+
+## 全局变量 datas 中没有管理员 TOKEN
+
+检查 `SMK-LOGIN-001` 是否启用且能够登录成功，并确认管理员账号、密码和 Excel 登录数据一致。
+
+## Excel sheet 不存在或用例未读取
+
+检查 sheet 名称是否与测试文件中的 `read_excel(sheet_name=...)` 一致；同时确认第 3 行是字段名，且目标用例的 `is_true` 已启用。
+
+## 接口返回 401 或 Token 无效
+
+确认请求头使用 `Authorization: Bearer <TOKEN>`，并检查该用例依赖的登录或刷新 Token 步骤是否已经执行。
